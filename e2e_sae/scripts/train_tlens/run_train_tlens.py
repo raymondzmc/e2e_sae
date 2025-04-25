@@ -26,22 +26,8 @@ from torch import Tensor
 from tqdm import tqdm
 from transformer_lens import HookedTransformer, HookedTransformerConfig, evals
 
-from e2e_sae.types import RootPath, TorchDtype
+from e2e_sae.types import RootPath, TorchDtype, HookedTransformerPreConfig
 from e2e_sae.utils import load_config, save_module, set_seed
-
-
-class HookedTransformerPreConfig(BaseModel):
-    """Pydantic model whose arguments will be passed to a HookedTransformerConfig."""
-
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True, frozen=True)
-    d_model: PositiveInt
-    n_layers: PositiveInt
-    n_ctx: PositiveInt
-    d_head: PositiveInt
-    d_vocab: PositiveInt
-    act_fn: str
-    dtype: TorchDtype | None
-    tokenizer_name: str
 
 
 class TrainConfig(BaseModel):

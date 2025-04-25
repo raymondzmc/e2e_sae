@@ -72,6 +72,9 @@ class SAEsConfig(BaseModel):
         "['hook_resid_post', 'hook_mlp_out']. Each entry gets matched to all hook positions that "
         "contain the given string.",
     )
+    # Bayesian sparsifier parameters
+    hard_concrete_beta: float = 0.5
+    hard_concrete_stretch_limits: tuple[float, float] = (-0.1, 1.1)
 
 
 class Config(BaseModel):
@@ -564,7 +567,6 @@ def main(
 ) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config: Config = load_config(config_path_or_obj, config_model=Config)
-
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
         # Save the config to wandb
@@ -604,6 +606,9 @@ def main(
         tlens_model=tlens_model,
         raw_sae_positions=raw_sae_positions,
         dict_size_to_input_ratio=config.saes.dict_size_to_input_ratio,
+        bayesian_sparsifier=True,
+        hard_concrete_beta=config.saes.hard_concrete_beta,
+        hard_concrete_stretch_limits=config.saes.hard_concrete_stretch_limits,
     ).to(device=device)
 
     all_param_names = [name for name, _ in model.saes.named_parameters()]

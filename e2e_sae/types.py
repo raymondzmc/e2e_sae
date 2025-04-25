@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal, TypedDict
 
 import torch
 from jaxtyping import Int
-from pydantic import BeforeValidator, PlainSerializer
+from pydantic import BaseModel, BeforeValidator, ConfigDict, PlainSerializer, PositiveInt
 from torch import Tensor
 
 from e2e_sae.utils import to_root_path
@@ -54,3 +54,18 @@ TorchDtype = Annotated[
 # This is a type for pydantic configs that will convert all relative paths
 # to be relative to the ROOT_DIR of e2e_sae
 RootPath = Annotated[Path, BeforeValidator(to_root_path), PlainSerializer(lambda x: str(x))]
+
+
+# Added class definition
+class HookedTransformerPreConfig(BaseModel):
+    """Pydantic model whose arguments will be passed to a HookedTransformerConfig."""
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True, frozen=True)
+    d_model: PositiveInt
+    n_layers: PositiveInt
+    n_ctx: PositiveInt
+    d_head: PositiveInt
+    d_vocab: PositiveInt
+    act_fn: str
+    dtype: TorchDtype | None
+    tokenizer_name: str

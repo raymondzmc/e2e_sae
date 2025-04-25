@@ -5,6 +5,7 @@ from jaxtyping import Float
 from transformer_lens.hook_points import HookPoint
 
 from e2e_sae.models.sparsifiers import SAE
+from e2e_sae.models.bayesian_sparsifier import BayesianSAE
 
 
 class CacheActs(NamedTuple):
@@ -15,16 +16,19 @@ class SAEActs(NamedTuple):
     input: Float[torch.Tensor, "... dim"]
     c: Float[torch.Tensor, "... c"]
     output: Float[torch.Tensor, "... dim"]
+    logits: Float[torch.Tensor, "... c"] | None = None
 
 
 def sae_hook(
     x: Float[torch.Tensor, "... dim"],
     hook: HookPoint | None,
-    sae: SAE | torch.nn.Module,
+    sae: SAE | BayesianSAE | torch.nn.Module,
     hook_acts: dict[str, Any],
     hook_key: str,
 ) -> Float[torch.Tensor, "... dim"]:
     """Runs the SAE on the input and stores the input, output and c in hook_acts under hook_key.
+
+    If the SAE is a BayesianSAE, also stores the logits.
 
     Args:
         x: The input.
@@ -36,8 +40,18 @@ def sae_hook(
     Returns:
         The output of the SAE.
     """
-    output, c = sae(x)
-    hook_acts[hook_key] = SAEActs(input=x, c=c, output=output)
+    if isinstance(sae, BayesianSAE):
+        output, c, logits = sae(x)
+        hook_acts[hook_key] = SAEActs(input=x, c=c, output=output, logits=logits)
+    elif isinstance(sae, SAE):
+        output, c = sae(x)
+        hook_acts[hook_key] = SAEActs(input=x, c=c, output=output, logits=None)
+    else:
+        # Fallback for generic torch.nn.Module - assumes (output, c) signature
+        # Might need adjustment if other SAE types are used
+        output, c = sae(x) # type: ignore
+        hook_acts[hook_key] = SAEActs(input=x, c=c, output=output, logits=None)
+
     return output
 
 

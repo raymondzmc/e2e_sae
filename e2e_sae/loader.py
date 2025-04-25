@@ -3,9 +3,7 @@ from pathlib import Path
 import torch
 import yaml
 from transformer_lens import HookedTransformer, HookedTransformerConfig
-
-from e2e_sae.scripts.train_tlens.run_train_tlens import HookedTransformerPreConfig
-from e2e_sae.types import RootPath
+from e2e_sae.types import RootPath, HookedTransformerPreConfig
 
 
 def load_tlens_model(

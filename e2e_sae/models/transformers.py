@@ -16,6 +16,7 @@ from wandb.apis.public import Run
 from e2e_sae.hooks import CacheActs, SAEActs, cache_hook, sae_hook
 from e2e_sae.loader import load_tlens_model
 from e2e_sae.models.sparsifiers import SAE
+from e2e_sae.models.bayesian_sparsifier import BayesianSAE
 from e2e_sae.utils import filter_names, get_hook_shapes
 
 
@@ -38,6 +39,9 @@ class SAETransformer(nn.Module):
         raw_sae_positions: list[str],
         dict_size_to_input_ratio: float,
         init_decoder_orthogonal: bool = True,
+        bayesian_sparsifier: bool = False,
+        hard_concrete_beta: float = 0.5,
+        hard_concrete_stretch_limits: tuple[float, float] = (-0.1, 1.1),
     ):
         super().__init__()
         self.tlens_model = tlens_model.eval()
@@ -51,11 +55,20 @@ class SAETransformer(nn.Module):
         self.saes = nn.ModuleDict()
         for i in range(len(self.all_sae_positions)):
             input_size = self.hook_shapes[self.raw_sae_positions[i]][-1]
-            self.saes[self.all_sae_positions[i]] = SAE(
-                input_size=input_size,
-                n_dict_components=int(dict_size_to_input_ratio * input_size),
-                init_decoder_orthogonal=init_decoder_orthogonal,
-            )
+            if bayesian_sparsifier:
+                self.saes[self.all_sae_positions[i]] = BayesianSAE(
+                    input_size=input_size,
+                    n_dict_components=int(dict_size_to_input_ratio * input_size),
+                    init_decoder_orthogonal=init_decoder_orthogonal,
+                    hard_concrete_beta=hard_concrete_beta,
+                    hard_concrete_stretch_limits=hard_concrete_stretch_limits,
+                )
+            else:
+                self.saes[self.all_sae_positions[i]] = SAE(
+                    input_size=input_size,
+                    n_dict_components=int(dict_size_to_input_ratio * input_size),
+                    init_decoder_orthogonal=init_decoder_orthogonal,
+                )
 
     def forward_raw(
         self,

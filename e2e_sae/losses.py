@@ -1,5 +1,5 @@
 from typing import Annotated
-
+import math
 import einops
 import torch
 import torch.nn.functional as F
@@ -42,20 +42,50 @@ def calc_explained_variance(
 class SparsityLoss(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     coeff: float
-    p_norm: float = 1.0
+    p_norm: float = 0.0
+
+    # L0 loss parameters
+    beta: float = 1.0 / 3.0
+    l: float = -0.1
+    r: float = 1.1
+    epsilon: float = 1e-6
+    
+    def cal_l0_loss(self, c: Float[Tensor, "... c"], dense_dim: int) -> Float[Tensor, ""]:
+        """Calculate the L0 loss.
+        """
+        if self.l >= 0 or self.r <= 0:
+            print(f"Warning: HardConcrete L0 penalty calculation requires l < 0 and r > 0. Got l={self.l}, r={self.r}. Returning 0 penalty.")
+            return torch.zeros_like(c)
+
+        safe_l = self.l if abs(self.l) > self.epsilon else -self.epsilon
+        safe_r = self.r if abs(self.r) > self.epsilon else self.epsilon
+
+        if (-safe_l / safe_r) <= 0:
+            print(f"Warning: Invalid term for log in L0 penalty: -l/r = {-safe_l / safe_r}. Returning 0 penalty.")
+            return torch.zeros_like(c)
+
+        log_ratio = math.log(-safe_l / safe_r)
+        penalty_per_element = torch.sigmoid(c - self.beta * log_ratio)
+        return penalty_per_element.sum(dim=-1).mean() / dense_dim
 
     def calc_loss(self, c: Float[Tensor, "... c"], dense_dim: int) -> Float[Tensor, ""]:
         """Calculate the sparsity loss.
+
         Note that we divide by the dimension of the input to the SAE. This helps with using the same
         hyperparameters across different model sizes (input dimension is more relevant than the c
         dimension for Lp loss).
         Args:
-            c: The activations after the non-linearity in the SAE.
+            c: The activations (for Lp loss) or logits (for L0 loss) after the non-linearity in the SAE.
             dense_dim: The dimension of the input to the SAE. Used to normalize the loss.
         Returns:
-            The L_p norm of the activations.
+            The L_p norm of the activations or the averaged L0 penalty.
         """
-        return torch.norm(c, p=self.p_norm, dim=-1).mean() / dense_dim
+        if self.p_norm == 0:
+            # c is actually logits here, passed from the main calc_loss function
+            return self.cal_l0_loss(c, dense_dim)
+        else:
+            # c is the activation map c here
+            return torch.norm(c, p=self.p_norm, dim=-1).mean() / dense_dim
 
 
 class InToOrigLoss(BaseModel):
@@ -247,7 +277,13 @@ def calc_loss(
                 )
             elif isinstance(loss_config, SparsityLoss):
                 assert isinstance(new_act, SAEActs)
-                loss_val = loss_config.calc_loss(new_act.c, dense_dim=new_act.input.shape[-1])
+                if loss_config.p_norm == 0:
+                    # For L0 loss, use logits
+                    assert new_act.logits is not None, "Logits must be provided for L0 loss"
+                    loss_val = loss_config.calc_loss(new_act.logits, dense_dim=new_act.input.shape[-1])
+                else:
+                    # For Lp loss, use activations c
+                    loss_val = loss_config.calc_loss(new_act.c, dense_dim=new_act.input.shape[-1])
             else:
                 assert loss_config is None or (
                     isinstance(loss_config, InToOrigLoss) and name not in loss_config.hook_positions
