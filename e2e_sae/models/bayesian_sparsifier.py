@@ -1,12 +1,7 @@
-"""
-Defines a generic MLP.
-"""
-
 import torch
 import torch.nn.functional as F
 from torch import nn
-import math
-from typing import Tuple
+
 
 class HardConcrete(nn.Module):
     """
@@ -79,7 +74,7 @@ class BayesianSAE(nn.Module):
         n_dict_components: int,
         init_decoder_orthogonal: bool = True,
         hard_concrete_beta: float = 1.0/3.0, # Temperature for Hard Concrete
-        hard_concrete_stretch_limits: Tuple[float, float] = (-0.1, 1.1) # Stretch limits for Hard Concrete
+        hard_concrete_stretch_limits: tuple[float, float] = (-0.1, 1.1) # Stretch limits for Hard Concrete
     ):
         """Initialize the SAE with Hard Concrete gates.
 
