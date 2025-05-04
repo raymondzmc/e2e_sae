@@ -43,12 +43,15 @@ from e2e_sae.metrics import (
     calc_sparsity_metrics,
     collect_act_frequency_metrics,
 )
+from e2e_sae.models.bayesian_sparsifier import BayesianSAE
 from e2e_sae.models.transformers import SAETransformer
 from e2e_sae.types import RootPath, Samples
 from e2e_sae.utils import (
     filter_names,
     get_cosine_schedule_with_warmup,
+    get_exponential_beta_schedule,
     get_linear_lr_schedule,
+    get_sparsity_coeff_schedule,
     init_wandb,
     load_config,
     replace_pydantic_model,
@@ -73,7 +76,8 @@ class SAEsConfig(BaseModel):
         "contain the given string.",
     )
     # Bayesian sparsifier parameters
-    hard_concrete_beta: float = 0.5
+    initial_beta: float = 0.5 # Initial beta for Hard Concrete annealing
+    final_beta: float = 2.0 # Final beta for Hard Concrete annealing
     hard_concrete_stretch_limits: tuple[float, float] = (-0.1, 1.1)
 
 
@@ -86,6 +90,7 @@ class Config(BaseModel):
         "parameters.",
     )
     wandb_run_name_prefix: str = Field("", description="Name that is prepended to the run name")
+    wandb_tags: list[str] | None = Field(None, description="Tags to add to the wandb run.")
     seed: NonNegativeInt = Field(
         0,
         description="Seed set at start of script. Also used for train_data.seed and eval_data.seed "
@@ -176,7 +181,7 @@ def get_run_name(config: Config) -> str:
     if config.wandb_run_name:
         run_suffix = config.wandb_run_name
     else:
-        coeff_info = f"seed-{config.seed}_lpcoeff-{config.loss.sparsity.coeff}"
+        coeff_info = f"seed-{config.seed}_lpcoeff-{config.loss.sparsity.final_coeff}"
         if config.loss.out_to_in is not None and config.loss.out_to_in.coeff > 0:
             coeff_info += f"_in-to-out-{config.loss.out_to_in.coeff}"
         if config.loss.logits_kl is not None and config.loss.logits_kl.coeff > 0:
@@ -332,7 +337,7 @@ def train(
 
     if config.lr_schedule == "cosine":
         assert config.n_samples is not None, "Cosine schedule requires n_samples."
-        scheduler = get_cosine_schedule_with_warmup(
+        lr_scheduler = get_cosine_schedule_with_warmup(
             optimizer,
             num_warmup_steps=config.warmup_samples // effective_batch_size,
             num_training_steps=config.n_samples // effective_batch_size,
@@ -347,13 +352,31 @@ def train(
             effective_batch_size=effective_batch_size,
             min_lr_factor=config.min_lr_factor,
         )
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_schedule)
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_schedule)
 
     if config.n_samples is None:
         # If streaming (i.e. if the dataset is an IterableDataset), we don't know the length
         n_batches = None if isinstance(train_loader.dataset, IterableDataset) else len(train_loader)
     else:
         n_batches = math.ceil(config.n_samples / config.batch_size)
+
+    # Prepare beta annealing schedule
+    total_steps = config.n_samples // effective_batch_size
+    warmup_steps = config.warmup_samples // effective_batch_size
+
+    beta_schedule = get_exponential_beta_schedule(
+        initial_beta=config.saes.initial_beta,
+        final_beta=config.saes.final_beta,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+    )
+    sparsity_coeff_schedule = get_sparsity_coeff_schedule(
+        initial_coeff=config.loss.sparsity.initial_coeff,
+        final_coeff=config.loss.sparsity.final_coeff,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+        schedule_type=config.loss.sparsity.coeff_annealing_schedule,
+    )
 
     final_layer = None
     if all(name.startswith("blocks.") for name in model.raw_sae_positions) and is_local:
@@ -379,6 +402,17 @@ def train(
 
     for batch_idx, batch in tqdm(enumerate(train_loader), total=n_batches, desc="Steps"):
         tokens: Int[Tensor, "batch pos"] = batch[config.train_data.column_name].to(device=device)
+
+        # Update beta in BayesianSAE modules based on schedule
+        current_beta = beta_schedule(grad_updates)
+        for sae_module in model.saes.modules():
+            if isinstance(sae_module, BayesianSAE):
+                # Ensure beta is on the correct device
+                beta_tensor = torch.tensor(current_beta, device=sae_module.beta.device, dtype=sae_module.beta.dtype)
+                sae_module.beta.copy_(beta_tensor)
+
+        # Calculate current sparsity coefficient
+        current_sparsity_coeff = sparsity_coeff_schedule(grad_updates)
 
         total_samples += tokens.shape[0]
         total_tokens += tokens.shape[0] * tokens.shape[1]
@@ -435,6 +469,7 @@ def train(
             orig_logits=None if new_logits is None else orig_logits.detach().clone(),
             new_logits=new_logits,
             loss_configs=config.loss,
+            current_sparsity_coeff=current_sparsity_coeff,
             is_log_step=is_log_step,
         )
 
@@ -449,7 +484,7 @@ def train(
             optimizer.step()
             optimizer.zero_grad()
             grad_updates += 1
-            scheduler.step()
+            lr_scheduler.step()
 
         if is_collect_act_frequency_step and act_frequency_metrics is None:
             # Start collecting activation frequency metrics for next config.act_frequency_n_tokens
@@ -490,6 +525,8 @@ def train(
                     "grad_updates": grad_updates,
                     "total_tokens": total_tokens,
                     "lr": optimizer.param_groups[0]["lr"],
+                    "beta": current_beta,
+                    "sparsity_coeff": current_sparsity_coeff,
                 }
                 log_info.update({k: v.item() for k, v in loss_dict.items()})
                 if grad_norm is not None:
@@ -568,7 +605,12 @@ def main(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config: Config = load_config(config_path_or_obj, config_model=Config)
     if config.wandb_project:
-        config = init_wandb(config, config.wandb_project, sweep_config_path)
+        config = init_wandb(
+            config,
+            config.wandb_project,
+            sweep_config_path,
+            tags=config.wandb_tags,
+        )
         # Save the config to wandb
         with TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "final_config.yaml"
@@ -607,7 +649,7 @@ def main(
         raw_sae_positions=raw_sae_positions,
         dict_size_to_input_ratio=config.saes.dict_size_to_input_ratio,
         bayesian_sparsifier=True,
-        hard_concrete_beta=config.saes.hard_concrete_beta,
+        initial_beta=config.saes.initial_beta,
         hard_concrete_stretch_limits=config.saes.hard_concrete_stretch_limits,
     ).to(device=device)
 

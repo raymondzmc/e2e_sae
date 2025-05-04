@@ -40,7 +40,7 @@ class SAETransformer(nn.Module):
         dict_size_to_input_ratio: float,
         init_decoder_orthogonal: bool = True,
         bayesian_sparsifier: bool = False,
-        hard_concrete_beta: float = 0.5,
+        initial_beta: float = 0.5,
         hard_concrete_stretch_limits: tuple[float, float] = (-0.1, 1.1),
     ):
         super().__init__()
@@ -60,8 +60,8 @@ class SAETransformer(nn.Module):
                     input_size=input_size,
                     n_dict_components=int(dict_size_to_input_ratio * input_size),
                     init_decoder_orthogonal=init_decoder_orthogonal,
-                    hard_concrete_beta=hard_concrete_beta,
-                    hard_concrete_stretch_limits=hard_concrete_stretch_limits,
+                    initial_beta=initial_beta,
+                    stretch_limits=hard_concrete_stretch_limits,
                 )
             else:
                 self.saes[self.all_sae_positions[i]] = SAE(

@@ -19,8 +19,6 @@ parameters:
     parameters:
       sae_positions:
         values: [blocks.4.hook_resid_pre]
-      dict_size_to_input_ratio:
-        values: [5, 20, 60, 100]
 
 command:
 - ${env}

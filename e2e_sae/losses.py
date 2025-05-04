@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 import math
 import einops
 import torch
@@ -44,45 +44,83 @@ class SparsityLoss(BaseModel):
     coeff: float
     p_norm: float = 0.0
 
-    # L0 loss parameters
-    beta: float = 1.0 / 3.0
-    l: float = -0.1
-    r: float = 1.1
-    epsilon: float = 1e-6
-    
-    def cal_l0_loss(self, c: Float[Tensor, "... c"], dense_dim: int) -> Float[Tensor, ""]:
-        """Calculate the L0 loss.
+    def cal_l0_loss(
+        self,
+        logits: Float[Tensor, "... c"],
+        beta: float,
+        l: float,
+        r: float,
+        dense_dim: int,
+        epsilon: float = 1e-6
+    ) -> Float[Tensor, ""]:
+        """Calculate the L0 loss using the Hard Concrete parameters.
+
+        This approximates the expected number of non-zero gates.
+        The formula is derived from the Hard Concrete paper (https://arxiv.org/abs/1712.01312).
+        The penalty per gate is sigmoid(logits - beta * log(-l/r)).
+        We sum this penalty over all gates and average over batch/position.
+        Then normalize by the dense dimension.
+
+        Args:
+            logits: Logits from the SAE encoder.
+            beta: Current Hard Concrete temperature.
+            l: Current Hard Concrete lower stretch limit.
+            r: Current Hard Concrete upper stretch limit.
+            dense_dim: Dimension of the original input activation to the SAE (for normalization).
+            epsilon: Small constant for numerical stability.
+
+        Returns:
+            Normalized L0 loss.
         """
-        if self.l >= 0 or self.r <= 0:
-            print(f"Warning: HardConcrete L0 penalty calculation requires l < 0 and r > 0. Got l={self.l}, r={self.r}. Returning 0 penalty.")
-            return torch.zeros_like(c)
+        # Ensure l < 0 and r > 1 (checked during BayesianSAE init)
+        # Ensure l and r are far enough from 0 for log
+        safe_l = l if abs(l) > epsilon else -epsilon
+        safe_r = r if abs(r) > epsilon else epsilon
 
-        safe_l = self.l if abs(self.l) > self.epsilon else -self.epsilon
-        safe_r = self.r if abs(self.r) > self.epsilon else self.epsilon
+        # Ensure the argument to log is positive
+        log_arg = -safe_l / safe_r
+        if log_arg <= 0:
+            print(f"Warning: Invalid term for log in L0 penalty: -l/r = {log_arg:.4f}. Returning 0 penalty.")
+            # Return a tensor with the correct device and dtype
+            return torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
-        if (-safe_l / safe_r) <= 0:
-            print(f"Warning: Invalid term for log in L0 penalty: -l/r = {-safe_l / safe_r}. Returning 0 penalty.")
-            return torch.zeros_like(c)
+        log_ratio = math.log(log_arg)
+        penalty_per_element = torch.sigmoid(logits - beta * log_ratio)
 
-        log_ratio = math.log(-safe_l / safe_r)
-        penalty_per_element = torch.sigmoid(c - self.beta * log_ratio)
+        # Sum over component dimension, average over batch/token dimensions
+        # Normalize by the dense dimension
         return penalty_per_element.sum(dim=-1).mean() / dense_dim
 
-    def calc_loss(self, c: Float[Tensor, "... c"], dense_dim: int) -> Float[Tensor, ""]:
+    def calc_loss(
+        self,
+        c: Float[Tensor, "... c"],
+        dense_dim: int,
+        logits: Float[Tensor, "... c"] | None = None,
+        beta: float | None = None,
+        l: float | None = None,
+        r: float | None = None,
+    ) -> Float[Tensor, ""]:
         """Calculate the sparsity loss.
 
         Note that we divide by the dimension of the input to the SAE. This helps with using the same
         hyperparameters across different model sizes (input dimension is more relevant than the c
         dimension for Lp loss).
         Args:
-            c: The activations (for Lp loss) or logits (for L0 loss) after the non-linearity in the SAE.
+            c: The activations after the non-linearity in the SAE (for Lp loss).
             dense_dim: The dimension of the input to the SAE. Used to normalize the loss.
+            logits: The logits before sampling (for L0 loss).
+            beta: The Hard Concrete beta parameter (for L0 loss).
+            l: The Hard Concrete lower stretch limit (for L0 loss).
+            r: The Hard Concrete upper stretch limit (for L0 loss).
         Returns:
             The L_p norm of the activations or the averaged L0 penalty.
         """
         if self.p_norm == 0:
-            # c is actually logits here, passed from the main calc_loss function
-            return self.cal_l0_loss(c, dense_dim)
+            assert logits is not None, "Logits must be provided for L0 loss (p_norm=0)"
+            assert beta is not None, "Beta must be provided for L0 loss (p_norm=0)"
+            assert l is not None, "Lower stretch limit l must be provided for L0 loss (p_norm=0)"
+            assert r is not None, "Upper stretch limit r must be provided for L0 loss (p_norm=0)"
+            return self.cal_l0_loss(logits, beta=beta, l=l, r=r, dense_dim=dense_dim)
         else:
             # c is the activation map c here
             return torch.norm(c, p=self.p_norm, dim=-1).mean() / dense_dim
@@ -195,6 +233,7 @@ def calc_loss(
     orig_logits: Float[Tensor, "batch pos vocab"] | None,
     new_logits: Float[Tensor, "batch pos vocab"] | None,
     loss_configs: LossConfigs,
+    current_sparsity_coeff: float | None = None,
     is_log_step: bool = False,
     train: bool = True,
 ) -> tuple[Float[Tensor, ""], dict[str, Float[Tensor, ""]]]:
@@ -211,6 +250,7 @@ def calc_loss(
         orig_logits: Logits from non-SAE-augmented model.
         new_logits: Logits from SAE-augmented model.
         loss_configs: Config for the losses to be computed.
+        current_sparsity_coeff: Current sparsity coefficient for SparsityLoss
         is_log_step: Whether to store additional loss information for logging.
         train: Whether in train or evaluation mode. Only affects the keys of the loss_dict.
 
@@ -278,20 +318,37 @@ def calc_loss(
             elif isinstance(loss_config, SparsityLoss):
                 assert isinstance(new_act, SAEActs)
                 if loss_config.p_norm == 0:
-                    # For L0 loss, use logits
+                    # For L0 loss, use logits and HC parameters
                     assert new_act.logits is not None, "Logits must be provided for L0 loss"
-                    loss_val = loss_config.calc_loss(new_act.logits, dense_dim=new_act.input.shape[-1])
+                    assert new_act.beta is not None, "Beta must be provided for L0 loss"
+                    assert new_act.l is not None, "L must be provided for L0 loss"
+                    assert new_act.r is not None, "R must be provided for L0 loss"
+                    loss_val = loss_config.calc_loss(
+                        c=new_act.c, # Not used for L0, but required by signature
+                        dense_dim=new_act.input.shape[-1],
+                        logits=new_act.logits,
+                        beta=new_act.beta,
+                        l=new_act.l,
+                        r=new_act.r,
+                    )
                 else:
                     # For Lp loss, use activations c
-                    loss_val = loss_config.calc_loss(new_act.c, dense_dim=new_act.input.shape[-1])
+                    loss_val = loss_config.calc_loss(c=new_act.c, dense_dim=new_act.input.shape[-1])
+                # Use the dynamically calculated current_sparsity_coeff
+                if current_sparsity_coeff is not None:
+                    loss_val = loss_val * current_sparsity_coeff
+                loss = loss + loss_val
+                loss_dict[f"{prefix}/{config_type}/{name}"] = loss_val.detach().clone()
             else:
                 assert loss_config is None or (
                     isinstance(loss_config, InToOrigLoss) and name not in loss_config.hook_positions
                 ), f"Unexpected loss_config {loss_config} for name {name}"
                 continue
 
-            loss = loss + loss_config.coeff * loss_val
-            loss_dict[f"{prefix}/{config_type}/{name}"] = loss_val.detach().clone()
+            # Apply coefficient only for non-sparsity losses here
+            if not isinstance(loss_config, SparsityLoss):
+                loss = loss + loss_config.coeff * loss_val
+                loss_dict[f"{prefix}/{config_type}/{name}"] = loss_val.detach().clone()
 
             if (
                 var is not None

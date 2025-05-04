@@ -136,45 +136,76 @@ def plot_facet(
     styles: Mapping[Any, Mapping[str, Any]] | None = None,
     title: Mapping[Any, str] | None = None,
     legend_title: str | None = None,
-    legend_pos: str = "lower right",
     axis_formatter: Callable[[Sequence[plt.Axes]], None] | None = None,
     out_file: str | Path | None = None,
     plot_type: Literal["line", "scatter"] = "line",
+    annotate_col: str | None = None,
     save_svg: bool = True,
 ) -> None:
-    """Line plot with multiple x-axes and one y-axis between them. One line for each run type.
+    """Generates faceted plots with multiple x-axes and a shared y-axis.
+
+    This function creates a figure with potentially multiple rows of subplots (facets).
+    Each row corresponds to a unique value in the `facet_by` column of the input DataFrame.
+    Within each row, there are multiple subplots arranged horizontally, one for each
+    variable specified in the `xs` list.
+
+    Data is grouped by the `line_by` column, and a separate line or set of scatter points
+    is drawn for each group (`line_val`) within each subplot. Colors are assigned
+    consistently to each `line_val` across all facets using the 'tab10' palette.
 
     Args:
-        df: DataFrame containing the data.
-        xs: The variables to plot on the x-axes.
-        y: The variable to plot on the y-axis.
-        facet_by: The variable to facet the plot by.
-        line_by: The variable to draw lines for.
-        line_by_vals: The values to draw lines for. If None, all unique values will be used.
-        sort_by: The variable governing how lines are drawn between points. If None, lines will be
-            drawn based on the y value.
-        title: The title of the plot.
-        xlabel: The labels for the x-axes.
-        ylabel: The label for the y-axis.
-        out_file: The filename which the plot will be saved as.
-        run_types: The run types to include in the plot.
-        xlims: The x-axis limits for each x-axis for each layer.
-        xticks: The x-ticks for each x-axis.
-        yticks: The y-ticks for the y-axis.
-        ylim: The y-axis limits for each layer.
-        styles: The styles to use for each line. If None, default styles will be used.
-        title: The title for each row of the plot.
-        legend_title: The title for the legend.
-        axis_formatter: A function to format the axes, e.g. to add "better" labels.
-        out_file: The filename which the plot will be saved as.
-        plot_type: The type of plot to create. Either "line" or "scatter".
-        save_svg: Whether to save the plot as an SVG file in addition to png. Default is True.
+        df: DataFrame containing the data to plot.
+        xs: Sequence of column names in `df` to use as the independent variables
+            for the different x-axes within each facet.
+        y: Column name in `df` to use as the dependent variable for the shared y-axis.
+        facet_by: Column name in `df` to group data into different rows (facets) of subplots.
+        line_by: Column name in `df` to group data into separate lines or scatter series
+            within each subplot.
+        line_by_vals: Optional sequence of specific values from the `line_by` column to plot.
+            If None, all unique values in `line_by` are plotted.
+        sort_by: Optional column name in `df` used to sort the data points before drawing lines.
+            If None and `plot_type` is 'line', defaults to the `y` column.
+            Crucial for ensuring lines connect points in the intended order.
+        xlabels: Optional sequence of strings to use as labels for the x-axes, corresponding
+            to the columns in `xs`. If None, the column names from `xs` are used.
+        ylabel: Optional string to use as the label for the y-axis. If None, the column name
+            from `y` is used.
+        suptitle: Optional string to set as the main title for the entire figure.
+        facet_vals: Optional sequence of values from the `facet_by` column. Determines which
+            facets are plotted and their order. If None, all unique values are plotted in
+            sorted order.
+        xlims: Optional sequence, one element per x-axis (matching `xs`). Each element
+            can be None or a mapping from `facet_val` to a tuple `(min, max)` defining
+            the x-axis limits for that specific axis within that specific facet.
+        xticks: Optional sequence, one element per x-axis (matching `xs`). Each element
+            can be None or a tuple `(ticks, labels)` for setting custom x-axis tick
+            positions and labels for that specific axis across all facets.
+        yticks: Optional tuple `(ticks, labels)` for setting custom y-axis tick positions and
+            labels. Applied only to the y-axis of the first subplot in each row.
+        ylim: Optional mapping from `facet_val` to a tuple `(min, max)` defining the y-axis
+            limits for all subplots within that specific facet.
+        styles: Optional mapping from `line_val` to a dictionary of matplotlib keyword arguments
+            (e.g., {'marker': '*', 'linestyle': '--', 'label': 'Custom Name'})
+            to customize the appearance of specific lines/scatter series.
+        title: Optional mapping from `facet_val` to a string to be used as the title for
+            that specific facet row. If None, titles default to f"{facet_by}={facet_val}".
+        legend_title: Optional string to use as the title for the figure legend. If None,
+            the column name from `line_by` is used.
+        axis_formatter: Optional callable that accepts a sequence of `plt.Axes` (the axes
+            for a single facet row) and applies custom formatting.
+        out_file: Optional path (string or Path object) where the plot will be saved.
+            If None, the plot is not saved.
+        plot_type: Specifies the type of plot: 'line' or 'scatter'.
+        annotate_col: If `plot_type` is 'scatter', specifies a column name in `df` whose
+            values will be used to annotate the scatter points. Requires values to be numeric.
+        save_svg: If True and `out_file` is specified, saves an additional SVG version
+            of the plot alongside the PNG.
     """
 
     num_axes = len(xs)
     if facet_vals is None:
         facet_vals = sorted(df[facet_by].unique())
-    if sort_by is None:
+    if sort_by is None and plot_type == "line":
         sort_by = y
 
     # TODO: For some reason the title is not centered at x=0.5. Fix
@@ -182,73 +213,141 @@ def plot_facet(
 
     sns.set_theme(style="darkgrid", rc={"axes.facecolor": "#f5f6fc"})
     fig_width = 4 * num_axes
-    fig = plt.figure(figsize=(fig_width, 4 * len(facet_vals)), constrained_layout=True)
+    fig_height_scale = 1.1 if len(facet_vals) == 1 else 1.0
+    fig = plt.figure(figsize=(fig_width, fig_height_scale * 4 * len(facet_vals)), constrained_layout=True)
     subfigs = fig.subfigures(len(facet_vals))
     subfigs = np.atleast_1d(subfigs)  # type: ignore
 
     # Get all unique line values from the entire DataFrame
     all_line_vals = df[line_by].unique()
     if line_by_vals is not None:
-        assert all(
-            val in all_line_vals for val in line_by_vals
-        ), f"Invalid line values: {line_by_vals}"
-        sorted_line_vals = line_by_vals
+        valid_line_by_vals = [val for val in line_by_vals if val in all_line_vals]
+        if len(valid_line_by_vals) != len(line_by_vals):
+            logger.warning(f"Some line_by_vals not found in data: {set(line_by_vals) - set(valid_line_by_vals)}")
+        sorted_line_vals = valid_line_by_vals
+        if not sorted_line_vals:
+            logger.error(f"No valid line_by_vals found from {line_by_vals} in column {line_by}")
+            plt.close(fig)
+            return
     else:
-        sorted_line_vals = sorted(all_line_vals, key=str if df[line_by].dtype == object else float)
+        sorted_line_vals = sorted(all_line_vals, key=str)
 
     colors = sns.color_palette("tab10", n_colors=len(sorted_line_vals))
+    # Create a map from line_val to its assigned color
+    color_map = {val: color for val, color in zip(sorted_line_vals, colors)}
+
+    # For figure legend
+    legend_handles = {}
+
     for subfig, facet_val in zip(subfigs, facet_vals, strict=False):
         axs = subfig.subplots(1, num_axes)
+        axs = np.atleast_1d(axs)  # Ensure axs is always array-like
         facet_df = df.loc[df[facet_by] == facet_val]
-        for line_val, color in zip(sorted_line_vals, colors, strict=True):
+
+        # Iterate through each line value to plot it
+        for line_val in sorted_line_vals:
             data = facet_df.loc[facet_df[line_by] == line_val]
+
+            # Base style determined by line_by and plot_type
+            base_color = color_map[line_val]  # Use the consistent color from the map
+            base_linestyle = "-" if plot_type == "line" else "None"
+            try:
+                base_label = str(line_val)
+            except Exception:
+                base_label = "ErrorLabel"
+
             line_style = {
-                "label": line_val,
+                "label": base_label,
                 "marker": "o",
                 "linewidth": 1.1,
-                "color": color,
-                "linestyle": "-" if plot_type == "line" else "None",
-            }  # default
+                "color": base_color,
+                "linestyle": base_linestyle,
+            }
+            # Apply overrides from 'styles' argument first
             line_style.update(
                 {} if styles is None else styles.get(line_val, {})
-            )  # specific overrides
+            )
+            current_label = line_style["label"]
+
             if not data.empty:
-                # draw the lines between points based on the y value
-                data = data.sort_values(sort_by)
+                plot_data = data.copy()
+                if sort_by:
+                    plot_data = plot_data.sort_values(sort_by)
+
                 for i in range(num_axes):
+                    x_col = xs[i]
+                    if x_col not in plot_data.columns:
+                        logger.warning(f"X-axis column '{x_col}' not found in data for line '{line_val}'. Skipping.")
+                        continue
+                    if y not in plot_data.columns:
+                        logger.warning(f"Y-axis column '{y}' not found in data for line '{line_val}'. Skipping.")
+                        continue
+
+                    plot_data_ax = plot_data.dropna(subset=[x_col, y])
+                    if annotate_col and annotate_col in plot_data_ax.columns:
+                        plot_data_ax = plot_data_ax.dropna(subset=[annotate_col])
+
                     if plot_type == "scatter":
-                        axs[i].scatter(data[xs[i]], data[y], **line_style)
+                        handle = axs[i].scatter(plot_data_ax[x_col], plot_data_ax[y], **line_style)
+                        if annotate_col and not plot_data_ax.empty:
+                            if annotate_col not in plot_data_ax.columns:
+                                logger.warning(f"Annotation column '{annotate_col}' not found. Skipping annotations.")
+                            else:
+                                for _, point_data in plot_data_ax.iterrows():
+                                    x_coord = point_data[x_col]
+                                    y_coord = point_data[y]
+                                    annotation_val = point_data[annotate_col]
+                                    axs[i].text(
+                                        x_coord,
+                                        y_coord,
+                                        f" {annotation_val:.2e}",
+                                        fontsize=7,
+                                        verticalalignment='bottom',
+                                        horizontalalignment='left',
+                                        clip_on=True
+                                    )
                     elif plot_type == "line":
-                        axs[i].plot(data[xs[i]], data[y], **line_style)
+                        handle, = axs[i].plot(plot_data_ax[x_col], plot_data_ax[y], **line_style)
                     else:
                         raise ValueError(f"Unknown plot type: {plot_type}")
-            else:
-                # Add empty plots for missing line values to ensure they appear in the legend
-                for i in range(num_axes):
-                    axs[i].plot([], [], **line_style)
 
-        if facet_val == facet_vals[-1]:
-            axs[0].legend(title=legend_title or line_by, loc=legend_pos)
+                    if current_label not in legend_handles:
+                        legend_handles[current_label] = handle
+
+            else:
+                for i in range(num_axes):
+                    handle, = axs[i].plot([], [], **line_style)
+                    if current_label not in legend_handles:
+                        legend_handles[current_label] = handle
 
         for i in range(num_axes):
             if xlims is not None and xlims[i] is not None:
-                xmin, xmax = xlims[i][facet_val]  # type: ignore
-                axs[i].set_xlim(xmin=xmin, xmax=xmax)
+                if facet_val in xlims[i]:
+                    xmin, xmax = xlims[i][facet_val]
+                    axs[i].set_xlim(xmin=xmin, xmax=xmax)
+                else:
+                    logger.warning(f"facet_val '{facet_val}' not found in xlims[{i}]. Using default limits.")
             if ylim is not None:
-                ymin, ymax = ylim[facet_val]
-                axs[i].set_ylim(ymin=ymin, ymax=ymax)
+                if facet_val in ylim:
+                    ymin, ymax = ylim[facet_val]
+                    axs[i].set_ylim(ymin=ymin, ymax=ymax)
+                else:
+                    logger.warning(f"facet_val '{facet_val}' not found in ylim. Using default limits for axis {i}.")
 
-        # Set a title above the subplots to show the layer number
-        row_title = title[facet_val] if title is not None else None
-        subfig.suptitle(row_title, fontweight="bold", x=xtitle_pos)
-        for i in range(num_axes):
-            axs[i].set_xlabel(xlabels[i] if xlabels is not None else xs[i])
+            row_title = title.get(facet_val) if title is not None else f"{facet_by}={facet_val}"
+            subfig.suptitle(row_title, fontweight="bold", x=xtitle_pos)
+
+            axs[i].set_xlabel(xlabels[i] if xlabels is not None and i < len(xlabels) else xs[i])
             if i == 0:
                 axs[i].set_ylabel(ylabel or y)
+            else:
+                axs[i].set_ylabel("")
+                axs[i].set_yticklabels([])
+
             if xticks is not None and xticks[i] is not None:
-                ticks, labels = xticks[i]  # type: ignore
+                ticks, labels = xticks[i]
                 axs[i].set_xticks(ticks, labels=labels)
-            if yticks is not None:
+            if yticks is not None and i == 0:
                 axs[i].set_yticks(yticks[0], yticks[1])
 
         if axis_formatter is not None:
@@ -257,11 +356,30 @@ def plot_facet(
     if suptitle is not None:
         fig.suptitle(suptitle, fontweight="bold", x=xtitle_pos)
 
+    # Create figure legend
+    if legend_handles:
+        ordered_handles = [legend_handles[label] for label in legend_handles if label in legend_handles]
+        ordered_labels = [label for label in legend_handles if label in legend_handles]
+
+        fig.legend(
+            ordered_handles,
+            ordered_labels,
+            title=legend_title or line_by,
+            loc='upper right',
+            bbox_to_anchor=(1, 1),
+        )
+
     if out_file is not None:
-        Path(out_file).parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(out_file, dpi=400)
-        logger.info(f"Saved to {out_file}")
-        if save_svg:
-            plt.savefig(Path(out_file).with_suffix(".svg"))
+        out_path = Path(out_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            plt.savefig(out_path, dpi=400, bbox_inches='tight')
+            logger.info(f"Saved plot to {out_path}")
+            if save_svg:
+                svg_path = out_path.with_suffix(".svg")
+                plt.savefig(svg_path, bbox_inches='tight')
+                logger.info(f"Saved SVG plot to {svg_path}")
+        except Exception as e:
+            logger.error(f"Failed to save plot to {out_path}: {e}")
 
     plt.close(fig)

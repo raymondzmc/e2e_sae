@@ -14,13 +14,11 @@ parameters:
       sparsity:
         parameters:
           coeff:
-            values: [50, 30, 20]
+            values: [50, 30, 20, 10, 5]
   saes:
     parameters:
       sae_positions:
-        values: [blocks.1.hook_resid_pre]
-      dict_size_to_input_ratio:
-        values: [5.0, 10.0]
+        values: [blocks.4.hook_resid_pre]
 
 command:
 - ${env}

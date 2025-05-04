@@ -1,4 +1,4 @@
-wandb_project: gpt2-layerwise_play
+wandb_project: gpt2-local
 wandb_run_name: null
 wandb_run_name_prefix: ""
 

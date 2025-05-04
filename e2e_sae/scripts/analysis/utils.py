@@ -184,6 +184,12 @@ def create_run_df(
 
                 run.summary["mean_grad_norm"] = mean_grad_norm
                 run.summary.update()
+        
+        # Backwards compatibility for old runs
+        if run.config["loss"]["sparsity"].get("coeff", None) is not None:
+            sparsity_coeff = run.config["loss"]["sparsity"]["coeff"]
+        else:
+            sparsity_coeff = run.config["loss"]["sparsity"]["final_coeff"]
 
         run_info.append(
             {
@@ -197,15 +203,17 @@ def create_run_df(
                 "n_samples": run.config["n_samples"],
                 "lr": run.config["lr"],
                 "ratio": ratio,
-                "sparsity_coeff": run.config["loss"]["sparsity"]["coeff"],
+                "sparsity_coeff": sparsity_coeff,
                 "in_to_orig_coeff": in_to_orig_coeff,
                 "kl_coeff": kl_coeff,
                 "out_to_in": out_to_in,
                 "L0": run.summary_metrics[f"sparsity/eval/L_0/{sae_pos}"],
+                "frac_zeros": run.summary_metrics[f"sparsity/eval/frac_zeros/{sae_pos}"],
                 "explained_var": explained_var,
                 "explained_var_ln": explained_var_ln,
                 "CE_diff": run.summary_metrics["performance/eval/difference_ce_loss"],
                 "CELossIncrease": -run.summary_metrics["performance/eval/difference_ce_loss"],
+                "StatisticalDistance": run.summary_metrics["performance/eval/orig_vs_sae_statistical_distance"],
                 "alive_dict_elements": run.summary_metrics[
                     f"sparsity/alive_dict_elements/{sae_pos}"
                 ],

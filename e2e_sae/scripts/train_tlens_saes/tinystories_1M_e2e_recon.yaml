@@ -1,4 +1,4 @@
-wandb_project: tinystories-1m-play
+wandb_project: tinystories-1m_play
 wandb_run_name: null
 wandb_run_name_prefix: ""
 
@@ -60,4 +60,4 @@ saes:
   pretrained_sae_paths: null  # Path or paths to pretrained SAEs
   sae_positions:  # Position or positions to place SAEs in the model
     - blocks.4.hook_resid_pre
-  dict_size_to_input_ratio: 60.0  # Size of the dictionary relative to the activations at the SAE positions
+  dict_size_to_input_ratio: 50.0  # Size of the dictionary relative to the activations at the SAE positions

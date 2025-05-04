@@ -1,4 +1,4 @@
-wandb_project: gpt2-e2e
+wandb_project: gpt2-ds
 wandb_run_name: null # If not set, will use a name based on important config values
 wandb_run_name_prefix: ""
 

@@ -83,6 +83,7 @@ class Config(BaseModel):
         "parameters.",
     )
     wandb_run_name_prefix: str = Field("", description="Name that is prepended to the run name")
+    wandb_tags: list[str] | None = Field(None, description="Tags to add to the wandb run.")
     seed: NonNegativeInt = Field(
         0,
         description="Seed set at start of script. Also used for train_data.seed and eval_data.seed "
@@ -566,7 +567,12 @@ def main(
     config: Config = load_config(config_path_or_obj, config_model=Config)
 
     if config.wandb_project:
-        config = init_wandb(config, config.wandb_project, sweep_config_path)
+        config = init_wandb(
+            config,
+            config.wandb_project,
+            sweep_config_path,
+            tags=config.wandb_tags,
+        )
         # Save the config to wandb
         with TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "final_config.yaml"

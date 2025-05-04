@@ -4,7 +4,7 @@ import random
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 import torch
@@ -243,6 +243,95 @@ def get_linear_lr_schedule(
     return lr_schedule
 
 
+def get_exponential_beta_schedule(
+    initial_beta: float,
+    final_beta: float,
+    warmup_steps: int,
+    total_steps: int,
+) -> Callable[[int], float]:
+    """Generates an exponential beta annealing schedule.
+
+    Beta remains constant at `initial_beta` during warmup, then decays
+    exponentially towards `final_beta`.
+
+    Args:
+        initial_beta: The starting value of beta.
+        final_beta: The target value of beta after decay.
+        warmup_steps: The number of steps during which beta remains constant.
+        total_steps: The total number of training steps.
+
+    Returns:
+        A function mapping training step to the corresponding beta value.
+
+    Raises:
+        AssertionError: If total_steps <= warmup_steps.
+    """
+    assert total_steps > warmup_steps, "Total steps must be greater than warmup steps."
+    decay_steps = total_steps - warmup_steps
+
+    # Calculate gamma such that initial_beta * (gamma ** decay_steps) = final_beta
+    if initial_beta == 0: # Avoid division by zero if initial_beta is 0
+        gamma = 0.0
+    elif final_beta == initial_beta: # Avoid 0^(1/inf) if betas are equal
+        gamma = 1.0
+    else:
+        gamma = (final_beta / initial_beta) ** (1.0 / decay_steps)
+
+    def beta_schedule(step: int) -> float:
+        if step < warmup_steps:
+            return initial_beta
+        else:
+            # Calculate steps into the decay phase
+            steps_into_decay = step - warmup_steps
+            # Apply exponential decay
+            current_beta = initial_beta * (gamma ** steps_into_decay)
+            # Ensure beta doesn't overshoot final_beta due to float precision
+            # This depends on whether we are annealing up or down
+            if initial_beta < final_beta:
+                return min(current_beta, final_beta)
+            else:
+                return max(current_beta, final_beta)
+
+    return beta_schedule
+
+
+def get_sparsity_coeff_schedule(
+    initial_coeff: float,
+    final_coeff: float,
+    warmup_steps: int,
+    total_steps: int,
+    schedule_type: Literal["linear", "exponential"],
+) -> Callable[[int], float]:
+    """Create a schedule for the sparsity coefficient."""
+    if schedule_type == "linear":
+        def scheduler(step: int) -> float:
+            if step < warmup_steps:
+                return initial_coeff
+            progress = max(0, step - warmup_steps) / max(1, total_steps - warmup_steps)
+            return initial_coeff + (final_coeff - initial_coeff) * progress
+    elif schedule_type == "exponential":
+        if initial_coeff == 0:
+            initial_coeff = 1e-6
+
+        # Handle non-positive initial or final coeffs (excluding initial_coeff == 0 handled above)
+        if initial_coeff < 0 or final_coeff <= 0:
+            logger.warning(
+                "Exponential sparsity coefficient annealing requires positive initial (>0) and final (>0) coeffs. "
+                "Falling back to linear schedule."
+            )
+            return get_sparsity_coeff_schedule(initial_coeff, final_coeff, warmup_steps, total_steps, "linear")
+
+        # Standard exponential schedule for positive initial and final coeffs
+        def scheduler(step: int) -> float:
+            if step < warmup_steps:
+                return initial_coeff
+            progress = max(0, step - warmup_steps) / max(1, total_steps - warmup_steps)
+            return initial_coeff * (final_coeff / initial_coeff) ** progress
+    else:
+        raise ValueError(f"Unknown sparsity coefficient schedule type: {schedule_type}")
+    return scheduler
+
+
 def _get_cosine_schedule_with_warmup_lr_lambda(
     current_step: int,
     *,
@@ -311,7 +400,12 @@ def get_cosine_schedule_with_warmup(
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) -> T:
+def init_wandb(
+    config: T,
+    project: str,
+    sweep_config_path: Path | str | None,
+    tags: list[str] | None = None,
+) -> T:
     """Initialize Weights & Biases and return a config updated with sweep hyperparameters.
 
     If no sweep config is provided, the config is returned as is.
@@ -332,10 +426,10 @@ def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) ->
     if sweep_config_path is not None:
         with open(sweep_config_path) as f:
             sweep_data = yaml.safe_load(f)
-        wandb.init(config=sweep_data, save_code=True)
+        wandb.init(config=sweep_data, save_code=True, tags=tags)
     else:
         load_dotenv(override=True)
-        wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True)
+        wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True, tags=tags)
 
     # Update the config with the hyperparameters for this sweep (if any)
     config = replace_pydantic_model(config, wandb.config)

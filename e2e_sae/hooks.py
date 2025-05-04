@@ -17,6 +17,9 @@ class SAEActs(NamedTuple):
     c: Float[torch.Tensor, "... c"]
     output: Float[torch.Tensor, "... dim"]
     logits: Float[torch.Tensor, "... c"] | None = None
+    beta: float | None = None
+    l: float | None = None
+    r: float | None = None
 
 
 def sae_hook(
@@ -41,8 +44,8 @@ def sae_hook(
         The output of the SAE.
     """
     if isinstance(sae, BayesianSAE):
-        output, c, logits = sae(x)
-        hook_acts[hook_key] = SAEActs(input=x, c=c, output=output, logits=logits)
+        output, c, logits, beta, l, r = sae(x)
+        hook_acts[hook_key] = SAEActs(input=x, c=c, output=output, logits=logits, beta=beta, l=l, r=r)
     elif isinstance(sae, SAE):
         output, c = sae(x)
         hook_acts[hook_key] = SAEActs(input=x, c=c, output=output, logits=None)
