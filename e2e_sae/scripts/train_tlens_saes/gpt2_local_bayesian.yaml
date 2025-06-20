@@ -1,6 +1,6 @@
 wandb_project: "gpt2"
 wandb_run_name: null
-wandb_run_name_prefix: ReLU
+wandb_run_name_prefix: Variational
 
 seed: 0
 tlens_model_name: gpt2-small
@@ -25,7 +25,7 @@ loss:
   # Note that "original acts" below refers to the activations in a model without SAEs
   sparsity:
     p_norm: 1.0  # p value in Lp norm
-    coeff: 6.0  # Multiplies the Lp norm in the loss (sparsity coefficient)
+    coeff: 1e-3  # Multiplies the Lp norm in the loss (sparsity coefficient)
   in_to_orig: null  # Used for e2e+future recon. MSE between the input to the SAE and original acts
   out_to_orig: null  # Not commonly used. MSE between the output of the SAE and original acts
   out_to_in:
@@ -55,4 +55,7 @@ saes:
     - blocks.6.hook_resid_pre
     - blocks.8.hook_resid_pre
     - blocks.10.hook_resid_pre
-  dict_size_to_input_ratio: 60.0  # Size of the dictionary relative to the activations at the SAE positions
+  dict_size_to_input_ratio: 50.0
+  initial_beta: 5.0
+  final_beta: 0.1
+  hard_concrete_stretch_limits: [-0.1, 1.1]

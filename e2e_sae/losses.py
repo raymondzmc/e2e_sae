@@ -334,10 +334,7 @@ def calc_loss(
                 else:
                     # For Lp loss, use activations c
                     loss_val = loss_config.calc_loss(c=new_act.c, dense_dim=new_act.input.shape[-1])
-                # Use the dynamically calculated current_sparsity_coeff
-                if current_sparsity_coeff is not None:
-                    loss_val = loss_val * current_sparsity_coeff
-                loss = loss + loss_val
+                loss = loss + loss_config.coeff * loss_val
                 loss_dict[f"{prefix}/{config_type}/{name}"] = loss_val.detach().clone()
             else:
                 assert loss_config is None or (

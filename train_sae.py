@@ -58,6 +58,6 @@ if __name__ == "__main__":
     parser.add_argument("--initial_beta", type=float, default=1.0)
     parser.add_argument("--final_beta", type=float, default=0.1)
     parser.add_argument("--num_seeds", type=int, default=1)
-    parser.add_argument("--layer", type=int, default=4)
+    parser.add_argument("--layer", type=int, default=None)
     args = parser.parse_args()
     main(args)

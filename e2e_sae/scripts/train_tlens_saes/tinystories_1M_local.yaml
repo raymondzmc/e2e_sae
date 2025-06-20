@@ -48,5 +48,5 @@ saes:
   retrain_saes: false
   pretrained_sae_paths: null
   sae_positions:
-    - blocks.4.hook_resid_pre
+    - blocks.2.hook_resid_pre
   dict_size_to_input_ratio: 50.0

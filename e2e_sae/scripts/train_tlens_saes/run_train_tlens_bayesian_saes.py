@@ -181,7 +181,7 @@ def get_run_name(config: Config) -> str:
     if config.wandb_run_name:
         run_suffix = config.wandb_run_name
     else:
-        coeff_info = f"seed-{config.seed}_lpcoeff-{config.loss.sparsity.final_coeff}"
+        coeff_info = f"seed-{config.seed}_lpcoeff-{config.loss.sparsity.coeff}"
         if config.loss.out_to_in is not None and config.loss.out_to_in.coeff > 0:
             coeff_info += f"_in-to-out-{config.loss.out_to_in.coeff}"
         if config.loss.logits_kl is not None and config.loss.logits_kl.coeff > 0:
@@ -370,13 +370,13 @@ def train(
         warmup_steps=warmup_steps,
         total_steps=total_steps,
     )
-    sparsity_coeff_schedule = get_sparsity_coeff_schedule(
-        initial_coeff=config.loss.sparsity.initial_coeff,
-        final_coeff=config.loss.sparsity.final_coeff,
-        warmup_steps=warmup_steps,
-        total_steps=total_steps,
-        schedule_type=config.loss.sparsity.coeff_annealing_schedule,
-    )
+    # sparsity_coeff_schedule = get_sparsity_coeff_schedule(
+    #     initial_coeff=config.loss.sparsity.initial_coeff,
+    #     final_coeff=config.loss.sparsity.final_coeff,
+    #     warmup_steps=warmup_steps,
+    #     total_steps=total_steps,
+    #     schedule_type=config.loss.sparsity.coeff_annealing_schedule,
+    # )
 
     final_layer = None
     if all(name.startswith("blocks.") for name in model.raw_sae_positions) and is_local:
@@ -412,7 +412,7 @@ def train(
                 sae_module.beta.copy_(beta_tensor)
 
         # Calculate current sparsity coefficient
-        current_sparsity_coeff = sparsity_coeff_schedule(grad_updates)
+        # current_sparsity_coeff = sparsity_coeff_schedule(grad_updates)
 
         total_samples += tokens.shape[0]
         total_tokens += tokens.shape[0] * tokens.shape[1]
@@ -469,7 +469,7 @@ def train(
             orig_logits=None if new_logits is None else orig_logits.detach().clone(),
             new_logits=new_logits,
             loss_configs=config.loss,
-            current_sparsity_coeff=current_sparsity_coeff,
+            # current_sparsity_coeff=current_sparsity_coeff,
             is_log_step=is_log_step,
         )
 
@@ -526,7 +526,7 @@ def train(
                     "total_tokens": total_tokens,
                     "lr": optimizer.param_groups[0]["lr"],
                     "beta": current_beta,
-                    "sparsity_coeff": current_sparsity_coeff,
+                    # "sparsity_coeff": current_sparsity_coeff,
                 }
                 log_info.update({k: v.item() for k, v in loss_dict.items()})
                 if grad_norm is not None:
