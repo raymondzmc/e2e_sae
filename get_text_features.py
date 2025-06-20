@@ -32,7 +32,9 @@ TARGET_FEATURES = 150
 TOP_K = 100
 NUM_FEATURES_FOR_EXPLANATION = 20
 MIN_COUNT = 20
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is required but not set")
 N_SAMPLES = 50000
 OPENAI_MODELS = {
     "gpt-4o-mini": "gpt-4o-mini-07-18",
