@@ -1,8 +1,8 @@
 #! /bin/bash
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=5
 
-CONFIG="e2e_sae/scripts/train_tlens_saes/gpt2_local.yaml"
-SPARSITY_COEFFS=(30 20)
+CONFIG="e2e_sae/scripts/train_tlens_saes/gpt2_local_10.yaml"
+SPARSITY_COEFFS=(1 0.5)
 # SPARSITY_COEFFS=(10 5 3 1)
 
 

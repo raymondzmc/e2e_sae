@@ -4,7 +4,7 @@ export CUDA_VISIBLE_DEVICES=4
 CONFIG="e2e_sae/scripts/train_tlens_saes/gpt2_local_bayesian.yaml"
 RUN_NAME_PREFIX="Variational"
 
-SPARSITY_COEFFS=(1e-2 5e-3)
+SPARSITY_COEFFS=(0.005 0.001)
 for SPARSITY in "${SPARSITY_COEFFS[@]}"
 do
   python train_sae.py \

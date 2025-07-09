@@ -1,6 +1,6 @@
-wandb_project: gpt2-local
+wandb_project: "gpt2"
 wandb_run_name: null
-wandb_run_name_prefix: ""
+wandb_run_name_prefix: ReLU
 
 seed: 0
 tlens_model_name: gpt2-small
@@ -51,4 +51,8 @@ saes:
   pretrained_sae_paths: null  # Path or paths to pretrained SAEs
   sae_positions:  # Position or positions to place SAEs in the model
     - blocks.2.hook_resid_pre
-  dict_size_to_input_ratio: 60.0  # Size of the dictionary relative to the activations at the SAE positions
+    - blocks.4.hook_resid_pre
+    - blocks.6.hook_resid_pre
+    - blocks.8.hook_resid_pre
+    - blocks.10.hook_resid_pre
+  dict_size_to_input_ratio: 10.0  # Size of the dictionary relative to the activations at the SAE positions

@@ -39,10 +39,6 @@ class HardConcrete(nn.Module):
         Returns:
             z: Sampled values (hard-thresholded in [0, 1]). Shape: (*, num_features)
         """
-        if not (l < 0.0 and r > 1.0):
-            # Warning: L0 penalty calculation (done elsewhere) might be incorrect if l >= 0 or r <= 1
-            pass
-
         if self.training:
             # Sample u ~ Uniform(0, 1)
             u = torch.rand_like(logits)

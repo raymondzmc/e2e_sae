@@ -466,12 +466,33 @@ class SAETransformer(nn.Module):
             list(tlens_model.hook_dict.keys()), config["saes"]["sae_positions"]
         )
 
-        model = cls(
-            tlens_model=tlens_model,
-            raw_sae_positions=raw_sae_positions,
-            dict_size_to_input_ratio=config["saes"]["dict_size_to_input_ratio"],
-            init_decoder_orthogonal=False,
+        # Check if this is a Bayesian SAE by looking for bayesian-specific config fields
+        is_bayesian = any(
+            key in config.get("saes", {})
+            for key in ["initial_beta", "final_beta", "hard_concrete_stretch_limits"]
         )
+
+        if is_bayesian:
+            # Extract Bayesian SAE parameters with defaults
+            initial_beta = config["saes"].get("initial_beta", 0.5)
+            hard_concrete_stretch_limits = config["saes"].get("hard_concrete_stretch_limits", (-0.1, 1.1))
+            
+            model = cls(
+                tlens_model=tlens_model,
+                raw_sae_positions=raw_sae_positions,
+                dict_size_to_input_ratio=config["saes"]["dict_size_to_input_ratio"],
+                init_decoder_orthogonal=False,
+                bayesian_sparsifier=True,
+                initial_beta=initial_beta,
+                hard_concrete_stretch_limits=hard_concrete_stretch_limits,
+            )
+        else:
+            model = cls(
+                tlens_model=tlens_model,
+                raw_sae_positions=raw_sae_positions,
+                dict_size_to_input_ratio=config["saes"]["dict_size_to_input_ratio"],
+                init_decoder_orthogonal=False,
+            )
 
         model.saes.load_state_dict(torch.load(checkpoint_file, map_location="cpu"))
         return model

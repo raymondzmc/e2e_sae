@@ -50,7 +50,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--sparsity_coeff", type=float, default=None, help="Initial coefficient for sparsity loss.")
-    parser.add_argument("--wandb_project", type=str, default=None)
+    parser.add_argument("--wandb_project", type=str, default="gpt2-dict-size-10")
     parser.add_argument("--wandb_run_name_prefix", type=str, default=None)
     parser.add_argument("--bayesian_sae", action="store_true")
     parser.add_argument("--wandb_tags", nargs='+', type=str, default=None, help="Tags to add to the wandb run.")

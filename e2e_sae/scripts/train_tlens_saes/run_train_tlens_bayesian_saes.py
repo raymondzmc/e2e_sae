@@ -202,7 +202,7 @@ def evaluate(
     model: SAETransformer,
     device: torch.device,
     cache_positions: list[str] | None,
-    log_resid_reconstruction: bool = True,
+    log_resid_reconstruction: bool = False,
 ) -> dict[str, float]:
     """Evaluate the model on the eval dataset.
 
@@ -279,8 +279,10 @@ def evaluate(
             tokens=tokens,
             sae_positions=model.raw_sae_positions,
             cache_positions=eval_cache_positions,
+            orig_acts=orig_acts,
         )
-        assert new_logits is not None, "new_logits should not be None during evaluation."
+        if eval_config.loss.logits_kl.coeff > 0:
+            assert new_logits is not None, "new_logits should not be None if logits_kl is used."
 
         raw_batch_loss_dict = calc_loss(
             orig_acts=orig_acts,
@@ -292,9 +294,12 @@ def evaluate(
             train=False,
         )[1]
         batch_loss_dict = {k: v.item() for k, v in raw_batch_loss_dict.items()}
-        batch_output_metrics = calc_output_metrics(
-            tokens=tokens, orig_logits=orig_logits, new_logits=new_logits, train=False
-        )
+        if new_logits is not None:
+            batch_output_metrics = calc_output_metrics(
+                tokens=tokens, orig_logits=orig_logits, new_logits=new_logits, train=False
+            )
+        else:
+            batch_output_metrics = {}
 
         sparsity_metrics = calc_sparsity_metrics(new_acts=new_acts, train=False)
 
@@ -586,11 +591,16 @@ def train(
             )
 
     if config.wandb_project:
+        # Clear GPU cache before final metrics collection to prevent OOM
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
         # Collect and log final activation frequency metrics
         metrics = collect_act_frequency_metrics(
             model=model,
             data_config=config.train_data,
-            batch_size=config.batch_size // 2,  # Hack to prevent OOM. TODO: Solve this properly
+            batch_size=1,
             global_seed=config.seed,
             device=device,
             n_tokens=config.act_frequency_n_tokens,
